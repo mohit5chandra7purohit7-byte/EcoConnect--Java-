@@ -1,0 +1,430 @@
+// ============================================================
+//  Ragpicker.java — Priyanshu's Module (EcoConnect)
+//  OOP Concept  : Inheritance + Method Overriding
+//                 (Person → Ragpicker, displayInfo() overridden)
+//  DSA Concept  : Graph + BFS — shortest path from ragpicker
+//                 to student location
+//                 Priority Queue — nearest ragpicker assigned first
+//
+//  NOTE: Entity class is named RagpickerWorker (to avoid clash
+//        with public class Ragpicker which matches the filename)
+//
+//  HOW TO RUN:
+//    javac Ragpicker.java
+//    java Ragpicker
+// ============================================================
+
+import java.util.*;
+
+// ============================================================
+//  CLASS: Person  (Abstract Base Class)
+//  Java Concept : Abstract class — cannot be instantiated directly
+//                 Forces subclasses to implement displayInfo()
+// ============================================================
+abstract class Person {
+
+    protected String id;
+    protected String name;
+
+    public Person(String id, String name) {
+        this.id   = id;
+        this.name = name;
+    }
+
+    // Abstract method — MUST be overridden by subclass
+    public abstract void displayInfo();
+
+    public String getId()   { return id;   }
+    public String getName() { return name; }
+}
+
+// ============================================================
+//  CLASS: RagpickerWorker  (extends Person)
+//  OOP Concept  : Inheritance — gets id, name from Person
+//                 Method Overriding — displayInfo() redefined here
+//  DSA Concept  : Implements Comparable — used by Priority Queue
+//                 RagpickerWorker with smallest distance goes to top
+// ============================================================
+class RagpickerWorker extends Person implements Comparable<RagpickerWorker> {
+
+    // Private fields — Encapsulation
+    private int     currentLocation;    // node number in campus graph
+    private double  rating;
+    private boolean isAvailable;
+    private int     distanceToStudent;  // filled in during BFS
+
+    public RagpickerWorker(String id, String name, int currentLocation, double rating) {
+        super(id, name);                        // calls Person constructor
+        this.currentLocation   = currentLocation;
+        this.rating            = rating;
+        this.isAvailable       = true;
+        this.distanceToStudent = Integer.MAX_VALUE;
+    }
+
+    // ---- METHOD OVERRIDING ----
+    // Person had this as abstract — Ragpicker gives it a body
+    @Override
+    public void displayInfo() {
+        System.out.println("---------------------------");
+        System.out.println("Ragpicker ID : " + id);
+        System.out.println("Name         : " + name);
+        System.out.println("Rating       : " + rating + " ⭐");
+        System.out.println("Status       : " + (isAvailable ? "Available ✅" : "Busy ❌"));
+        System.out.println("Distance     : " +
+            (distanceToStudent == Integer.MAX_VALUE ? "Not calculated" : distanceToStudent + " units"));
+        System.out.println("---------------------------");
+    }
+
+    // ---- COMPARABLE — for Priority Queue ----
+    // Java's PriorityQueue uses this to decide order
+    // Smaller distance = higher priority (comes out first)
+    @Override
+    public int compareTo(RagpickerWorker other) {
+        return Integer.compare(this.distanceToStudent, other.distanceToStudent);
+    }
+
+    // ---- GETTERS & SETTERS ----
+    public int     getCurrentLocation()   { return currentLocation;   }
+    public double  getRating()            { return rating;            }
+    public boolean isAvailable()          { return isAvailable;       }
+    public int     getDistanceToStudent() { return distanceToStudent; }
+
+    public void setAvailable(boolean val)           { this.isAvailable = val;       }
+    public void setDistanceToStudent(int distance)  { this.distanceToStudent = distance; }
+}
+
+// ============================================================
+//  CLASS: PickupRequest
+//  Represents one pickup request raised by a student
+// ============================================================
+class PickupRequest {
+
+    private String requestId;
+    private String studentId;
+    private int    studentLocation;   // graph node where student is
+    private String wasteType;
+    private String status;            // PENDING / ASSIGNED / ACCEPTED / REJECTED
+    private String assignedRagpickerId;
+
+    public PickupRequest(String requestId, String studentId,
+                         int studentLocation, String wasteType) {
+        this.requestId          = requestId;
+        this.studentId          = studentId;
+        this.studentLocation    = studentLocation;
+        this.wasteType          = wasteType;
+        this.status             = "PENDING";
+        this.assignedRagpickerId = null;
+    }
+
+    public void displayRequest() {
+        System.out.println("Request ID  : " + requestId);
+        System.out.println("Student ID  : " + studentId);
+        System.out.println("Waste Type  : " + wasteType);
+        System.out.println("Status      : " + status);
+        System.out.println("Assigned To : " + (assignedRagpickerId != null ? assignedRagpickerId : "Unassigned"));
+    }
+
+    // Getters
+    public String getRequestId()           { return requestId;           }
+    public String getStudentId()           { return studentId;           }
+    public int    getStudentLocation()     { return studentLocation;     }
+    public String getWasteType()           { return wasteType;           }
+    public String getStatus()              { return status;              }
+    public String getAssignedRagpickerId() { return assignedRagpickerId; }
+
+    // Setters
+    public void setStatus(String status)                     { this.status = status;                     }
+    public void setAssignedRagpickerId(String ragpickerId)   { this.assignedRagpickerId = ragpickerId;   }
+}
+
+// ============================================================
+//  CLASS: CampusGraph
+//  DSA Concept  : Graph — adjacency list representation
+//                 BFS — finds shortest path between two nodes
+//
+//  Nodes = locations on campus (Gate, Hostel, Library, etc.)
+//  Edges = roads connecting those locations (with distance)
+// ============================================================
+class CampusGraph {
+
+    private int nodes;
+    private List<List<int[]>> adjList;   // adjList[u] = list of {v, weight}
+
+    public CampusGraph(int nodes) {
+        this.nodes = nodes;
+        adjList = new ArrayList<>();
+        for (int i = 0; i < nodes; i++) {
+            adjList.add(new ArrayList<>());
+        }
+    }
+
+    // Add undirected edge between u and v with given weight
+    public void addEdge(int u, int v, int weight) {
+        adjList.get(u).add(new int[]{v, weight});
+        adjList.get(v).add(new int[]{u, weight});
+    }
+
+    // ---- BFS — Shortest Distance ----
+    // Starts at 'source', visits all reachable nodes
+    // Returns total weight (distance) to reach 'target'
+    public int bfsShortestDistance(int source, int target) {
+        if (source == target) return 0;
+
+        int[] dist = new int[nodes];
+        Arrays.fill(dist, Integer.MAX_VALUE);   // assume unreachable initially
+        dist[source] = 0;
+
+        Queue<Integer> queue = new LinkedList<>();
+        queue.add(source);
+
+        // Standard BFS loop
+        while (!queue.isEmpty()) {
+            int curr = queue.poll();
+
+            for (int[] neighbor : adjList.get(curr)) {
+                int next   = neighbor[0];
+                int weight = neighbor[1];
+
+                // If we found a shorter path to 'next', update it
+                if (dist[curr] + weight < dist[next]) {
+                    dist[next] = dist[curr] + weight;
+                    queue.add(next);
+                }
+            }
+        }
+
+        return dist[target];   // Integer.MAX_VALUE if not reachable
+    }
+
+    // ---- BFS — Path Trace ----
+    // Returns the actual list of nodes to travel through
+    public List<Integer> bfsPath(int source, int target) {
+        if (source == target) return List.of(source);
+
+        int[]   prev    = new int[nodes];
+        boolean[] visited = new boolean[nodes];
+        Arrays.fill(prev, -1);
+
+        Queue<Integer> queue = new LinkedList<>();
+        queue.add(source);
+        visited[source] = true;
+
+        while (!queue.isEmpty()) {
+            int curr = queue.poll();
+            if (curr == target) break;
+
+            for (int[] neighbor : adjList.get(curr)) {
+                int next = neighbor[0];
+                if (!visited[next]) {
+                    visited[next] = true;
+                    prev[next]    = curr;
+                    queue.add(next);
+                }
+            }
+        }
+
+        // Reconstruct path by backtracking through prev[]
+        List<Integer> path = new ArrayList<>();
+        for (int at = target; at != -1; at = prev[at]) {
+            path.add(at);
+        }
+        Collections.reverse(path);
+        return (path.get(0) == source) ? path : Collections.emptyList();
+    }
+}
+
+// ============================================================
+//  CLASS: RagpickerService
+//  Manages all ragpickers and pickup requests
+//  DSA Concept  : Priority Queue — picks nearest ragpicker first
+//                 O(log n) insertion, O(1) peek at minimum
+// ============================================================
+class RagpickerService {
+
+    private List<RagpickerWorker>              ragpickers      = new ArrayList<>();
+    private List<PickupRequest>                incomingRequests = new ArrayList<>();
+    private HashMap<String, PickupRequest>     requestMap      = new HashMap<>();
+
+    private CampusGraph campus;
+    private String[]    locationNames;
+
+    public RagpickerService(CampusGraph campus, String[] locationNames) {
+        this.campus        = campus;
+        this.locationNames = locationNames;
+    }
+
+    // Register a ragpicker into the system
+    public void registerRagpicker(RagpickerWorker r) {
+        ragpickers.add(r);
+        System.out.println("✅ Registered ragpicker: " + r.getName());
+    }
+
+    // ---- CORE DSA: BFS + Priority Queue ----
+    // For each available ragpicker → BFS to get distance to student
+    // Insert into PriorityQueue → nearest one comes out first
+    public void assignNearestRagpicker(PickupRequest request) {
+        int studentLoc = request.getStudentLocation();
+
+        // Min-heap: Ragpicker with smallest distanceToStudent at top
+        PriorityQueue<RagpickerWorker> pq = new PriorityQueue<>();
+
+        System.out.println("\n🔍 Running BFS for each ragpicker...");
+        for (RagpickerWorker r : ragpickers) {
+            if (!r.isAvailable()) continue;
+
+            // BFS gives shortest weighted distance
+            int dist = campus.bfsShortestDistance(r.getCurrentLocation(), studentLoc);
+            r.setDistanceToStudent(dist);
+
+            System.out.println("   " + r.getName() +
+                " [" + locationNames[r.getCurrentLocation()] + "]" +
+                " → Distance: " + dist + " units");
+
+            pq.add(r);   // PriorityQueue auto-sorts using compareTo()
+        }
+
+        if (pq.isEmpty()) {
+            System.out.println("❌ No ragpickers available right now.");
+            return;
+        }
+
+        // Poll = remove the ragpicker with smallest distance (top of min-heap)
+        RagpickerWorker nearest = pq.poll();
+        nearest.setAvailable(false);
+        request.setAssignedRagpickerId(nearest.getId());
+        request.setStatus("ASSIGNED");
+
+        // BFS path for display
+        List<Integer> path = campus.bfsPath(nearest.getCurrentLocation(), studentLoc);
+        System.out.println("\n✅ Nearest Ragpicker Assigned: " + nearest.getName()
+            + " (ID: " + nearest.getId() + ")");
+        System.out.print("🗺️  Route: ");
+        for (int i = 0; i < path.size(); i++) {
+            System.out.print(locationNames[path.get(i)]);
+            if (i < path.size() - 1) System.out.print(" → ");
+        }
+        System.out.println();
+
+        // Store request
+        incomingRequests.add(request);
+        requestMap.put(request.getRequestId(), request);
+    }
+
+    // Show all incoming requests (Incoming Requests Page)
+    public void showIncomingRequests() {
+        System.out.println("\n--- Incoming Requests ---");
+        if (incomingRequests.isEmpty()) {
+            System.out.println("No requests yet.");
+            return;
+        }
+        for (PickupRequest req : incomingRequests) {
+            req.displayRequest();
+            System.out.println("---");
+        }
+    }
+
+    // Accept or Reject a pickup request (Accept/Reject Page)
+    public void processRequest(String requestId, boolean accept) {
+        PickupRequest req = requestMap.get(requestId);   // O(1) HashMap lookup
+
+        if (req == null) {
+            System.out.println("❌ Request not found: " + requestId);
+            return;
+        }
+
+        if (accept) {
+            req.setStatus("ACCEPTED");
+            System.out.println("✅ Request " + requestId + " ACCEPTED.");
+        } else {
+            req.setStatus("REJECTED");
+            System.out.println("❌ Request " + requestId + " REJECTED. Re-assigning...");
+
+            // Free up the ragpicker who rejected
+            for (RagpickerWorker r : ragpickers) {
+                if (r.getId().equals(req.getAssignedRagpickerId())) {
+                    r.setAvailable(true);
+                    System.out.println("🔄 " + r.getName() + " is now available again.");
+                    break;
+                }
+            }
+
+            // Try assigning next nearest ragpicker
+            req.setAssignedRagpickerId(null);
+            req.setStatus("PENDING");
+            assignNearestRagpicker(req);
+        }
+    }
+}
+
+// ============================================================
+//  MAIN — Demo: shows OOP + Graph BFS + Priority Queue working
+// ============================================================
+public class Ragpicker {
+
+    public static void main(String[] args) {
+
+        System.out.println("======================================");
+        System.out.println("  EcoConnect — Ragpicker Module");
+        System.out.println("  OOP : Inheritance + Method Overriding");
+        System.out.println("  DSA : Graph + BFS + Priority Queue");
+        System.out.println("======================================\n");
+
+        // ---- SETUP CAMPUS GRAPH ----
+        // 6 locations as nodes, roads as weighted edges
+        // 0=Gate  1=Hostel  2=Library  3=Canteen  4=Lab  5=Ground
+        String[] locationNames = {"Gate", "Hostel", "Library", "Canteen", "Lab", "Ground"};
+
+        CampusGraph campus = new CampusGraph(6);
+        campus.addEdge(0, 1, 2);   // Gate — Hostel   : 2 units
+        campus.addEdge(0, 2, 4);   // Gate — Library  : 4 units
+        campus.addEdge(1, 3, 3);   // Hostel — Canteen: 3 units
+        campus.addEdge(2, 3, 1);   // Library—Canteen : 1 unit
+        campus.addEdge(3, 4, 2);   // Canteen — Lab   : 2 units
+        campus.addEdge(4, 5, 1);   // Lab — Ground    : 1 unit
+        campus.addEdge(1, 5, 6);   // Hostel — Ground : 6 units
+
+        // ---- CREATE SERVICE ----
+        RagpickerService service = new RagpickerService(campus, locationNames);
+
+        // ---- REGISTER RAGPICKERS ----
+        // OOP: These objects are of type Ragpicker (which extends Person)
+        RagpickerWorker r1 = new RagpickerWorker("R001", "Suresh", 0, 4.8);   // at Gate
+        RagpickerWorker r2 = new RagpickerWorker("R002", "Ramesh", 3, 4.5);   // at Canteen
+        RagpickerWorker r3 = new RagpickerWorker("R003", "Dinesh", 5, 4.2);   // at Ground
+
+        System.out.println();
+        service.registerRagpicker(r1);
+        service.registerRagpicker(r2);
+        service.registerRagpicker(r3);
+
+        // ---- SHOW RAGPICKER INFO (Method Overriding demo) ----
+        System.out.println("\n--- Ragpicker Dashboard ---");
+        r1.displayInfo();   // calls Ragpicker's overridden displayInfo()
+        r2.displayInfo();
+        r3.displayInfo();
+
+        // ---- STUDENT RAISES A PICKUP REQUEST ----
+        System.out.println("\n--- New Pickup Request ---");
+        PickupRequest req1 = new PickupRequest("REQ001", "STU123", 4, "Heavy Scrap");
+        System.out.println("📍 Student Location : " + locationNames[req1.getStudentLocation()]);
+        System.out.println("📦 Waste Type       : " + req1.getWasteType());
+
+        // ---- ASSIGN NEAREST RAGPICKER — BFS + Priority Queue ----
+        service.assignNearestRagpicker(req1);
+
+        // ---- INCOMING REQUESTS PAGE ----
+        service.showIncomingRequests();
+
+        // ---- ACCEPT / REJECT PAGE ----
+        System.out.println("\n--- Accept / Reject Simulation ---");
+        service.processRequest("REQ001", true);    // Ragpicker accepts
+
+        // ---- REJECTION TEST ----
+        System.out.println("\n--- Rejection Test ---");
+        PickupRequest req2 = new PickupRequest("REQ002", "STU456", 2, "E-Waste");
+        service.assignNearestRagpicker(req2);
+        service.processRequest("REQ002", false);   // Ragpicker rejects → re-assign
+
+        System.out.println("\n======================================");
+    }
+}
